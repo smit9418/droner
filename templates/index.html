@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Drone Ground Station</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root {
+            --dark-bg: #0a192f;
+            --card-bg: #112240;
+            --accent: #64ffda;
+            --text: #e6f1ff;
+        }
+        body { 
+            margin: 0; 
+            background: var(--dark-bg); 
+            color: var(--text);
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+        }
+        #container {
+            display: grid;
+            height: 100vh;
+            grid-template-rows: auto 1fr auto;
+        }
+        header {
+            background: rgba(10, 25, 47, 0.8);
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            backdrop-filter: blur(10px);
+        }
+        .preset-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        .preset-btn {
+            background: var(--card-bg);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            padding: 15px;
+        }
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+        .card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        #video-card {
+            grid-column: span 2;
+        }
+        #video {
+            width: 100%;
+            background: #000;
+            border-radius: 4px;
+        }
+        .telemetry-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .telemetry-card {
+            background: rgba(100, 255, 218, 0.1);
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--accent);
+        }
+        .label {
+            font-size: 12px;
+            opacity: 0.7;
+        }
+        footer {
+            padding: 15px;
+            text-align: center;
+            background: rgba(10, 25, 47, 0.8);
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <header>
+            <h1>Drone Ground Station</h1>
+            <div class="preset-buttons">
+                <div class="preset-btn" data-preset="dashboard">Dashboard</div>
+                <div class="preset-btn" data-preset="map">Map View</div>
+                <div class="preset-btn" data-preset="cinematic">Cinematic</div>
+            </div>
+        </header>
+        
+        <div class="main-content">
+            <div class="card" id="video-card">
+                <img id="video" src="{{ url_for('video_feed') }}">
+            </div>
+            
+            <div class="card">
+                <h2>Flight Data</h2>
+                <div class="telemetry-grid">
+                    <div class="telemetry-card">
+                        <div class="value" id="altitude">0</div>
+                        <div class="label">ALTITUDE (m)</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="value" id="speed">0</div>
+                        <div class="label">SPEED (km/h)</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="value" id="battery">0</div>
+                        <div class="label">BATTERY (%)</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="value" id="satellites">0</div>
+                        <div class="label">SATELLITES</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>Map View</h2>
+                <div id="map" style="height: 200px; background: #1a2b45; border-radius: 4px;"></div>
+            </div>
+        </div>
+        
+        <footer>
+            <div>Connection: <span id="connection-status">Active</span></div>
+        </footer>
+    </div>
+
+    <script>
+        // WebSocket for real-time telemetry
+        const ws = new WebSocket(`ws://${location.host}/ws`);
+        
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            document.getElementById('altitude').textContent = data.altitude.toFixed(1);
+            document.getElementById('speed').textContent = data.speed.toFixed(1);
+            document.getElementById('battery').textContent = data.battery;
+            document.getElementById('satellites').textContent = data.satellites || 0;
+        };
+        
+        // UI Preset Switching
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const preset = btn.dataset.preset;
+                fetch('/set_preset', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({preset})
+                });
+            });
+        });
+        
+        // Initialize map (using Leaflet.js in real implementation)
+        // For demo purposes only
+        const mapEl = document.getElementById('map');
+        mapEl.innerHTML = '<div style="padding:20px;text-align:center;">Map View<br><small>(Satellite view would appear here)</small></div>';
+    </script>
+</body>
+</html>

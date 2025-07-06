@@ -1,0 +1,6 @@
+opencv-contrib-python
+flask
+pymavlink
+pyserial
+pygame
+numpy
