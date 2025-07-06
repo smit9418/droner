@@ -119,6 +119,8 @@
             border: none;
             color: var(--accent);
             cursor: pointer;
+            font-size: 0.8rem;
+            padding: 5px;
         }
         .flight-item {
             padding: 10px;
@@ -223,28 +225,11 @@
                         <option value="viewer">Viewer</option>
                     </select>
                 </div>
-                <button class="btn btn-primary" style="width: 100%;">Add User</button>
+                <button class="btn btn-primary" id="add-user-btn">Add User</button>
                 
                 <h3 style="margin-top: 20px;">Existing Users</h3>
-                <div class="users-list">
-                    <div class="user-item">
-                        <div>
-                            <strong>admin</strong> (Admin)
-                        </div>
-                        <div class="user-actions">
-                            <button class="user-action-btn">Edit</button>
-                            <button class="user-action-btn">Delete</button>
-                        </div>
-                    </div>
-                    <div class="user-item">
-                        <div>
-                            <strong>viewer</strong> (Viewer)
-                        </div>
-                        <div class="user-actions">
-                            <button class="user-action-btn">Edit</button>
-                            <button class="user-action-btn">Delete</button>
-                        </div>
-                    </div>
+                <div class="users-list" id="users-list">
+                    <!-- Users will be populated here by JavaScript -->
                 </div>
             </div>
             
@@ -328,33 +313,118 @@
     </div>
 
     <script>
-        // Load current settings
+        // Load users when page opens
         document.addEventListener('DOMContentLoaded', () => {
-            // Set current camera
-            fetch('/get_settings')
-                .then(res => res.json())
+            fetch('/list_users')
+                .then(response => response.json())
                 .then(data => {
-                    document.getElementById('camera-select').value = data.camera;
-                    document.getElementById('osd-toggle').checked = data.osd_enabled;
+                    const usersList = document.getElementById('users-list');
+                    usersList.innerHTML = '';
+                    
+                    data.users.forEach(user => {
+                        const userItem = document.createElement('div');
+                        userItem.className = 'user-item';
+                        userItem.innerHTML = `
+                            <div>
+                                <strong>${user.username}</strong> (${user.role})
+                            </div>
+                            <div class="user-actions">
+                                <button class="user-action-btn change-password-btn" 
+                                        data-user="${user.username}">Change Password</button>
+                                ${user.role !== 'admin' ? 
+                                    `<button class="user-action-btn delete-user-btn" 
+                                            data-user="${user.username}">Delete</button>` : ''}
+                            </div>
+                        `;
+                        usersList.appendChild(userItem);
+                    });
+                    
+                    // Add event listeners
+                    document.querySelectorAll('.delete-user-btn').forEach(btn => {
+                        btn.addEventListener('click', function() {
+                            const username = this.getAttribute('data-user');
+                            deleteUser(username);
+                        });
+                    });
+                    
+                    document.querySelectorAll('.change-password-btn').forEach(btn => {
+                        btn.addEventListener('click', function() {
+                            const username = this.getAttribute('data-user');
+                            changePassword(username);
+                        });
+                    });
                 });
-                
-            // Add event listeners
-            document.getElementById('camera-select').addEventListener('change', (e) => {
-                fetch('/switch_camera', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({camera: e.target.value})
-                });
-            });
+        });
+
+        // Add user functionality
+        document.getElementById('add-user-btn').addEventListener('click', () => {
+            const username = document.getElementById('new-username').value;
+            const password = document.getElementById('new-password').value;
+            const role = document.getElementById('new-role').value;
             
-            document.getElementById('osd-toggle').addEventListener('change', (e) => {
-                fetch('/toggle_osd', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({state: e.target.checked})
-                });
+            if (!username || !password) {
+                alert('Please enter both username and password');
+                return;
+            }
+            
+            fetch('/add_user', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username, password, role})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('User added successfully');
+                    // Refresh user list
+                    document.dispatchEvent(new Event('DOMContentLoaded'));
+                    // Clear form
+                    document.getElementById('new-username').value = '';
+                    document.getElementById('new-password').value = '';
+                } else {
+                    alert('Error: ' + data.message);
+                }
             });
         });
+
+        function deleteUser(username) {
+            if (!confirm(`Are you sure you want to delete user ${username}?`)) return;
+            
+            fetch('/delete_user', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('User deleted successfully');
+                    // Refresh user list
+                    document.dispatchEvent(new Event('DOMContentLoaded'));
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            });
+        }
+
+        function changePassword(username) {
+            const newPassword = prompt(`Enter new password for ${username}:`, '');
+            if (!newPassword) return;
+            
+            fetch('/change_password', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username, new_password: newPassword})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('Password changed successfully');
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            });
+        }
     </script>
 </body>
 </html>

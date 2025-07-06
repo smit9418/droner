@@ -17,8 +17,12 @@
             margin: 0;
             padding: 0;
         }
+        body, html {
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+        }
         body { 
-            margin: 0; 
             background: var(--dark-bg); 
             color: var(--text);
             font-family: 'Segoe UI', Tahoma, sans-serif;
@@ -84,24 +88,29 @@
         }
         
         .main-container {
-            display: grid;
-            grid-template-columns: 1fr 300px;
+            display: flex;
+            flex: 1;
+            min-height: 0;
             height: 100%;
-            overflow: hidden;
         }
         
         .map-video-container {
-            display: grid;
-            grid-template-rows: 60% 40%;
-            position: relative;
+            flex: 3;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
         }
         
         #map {
+            flex: 1;
+            min-height: 0;
             background: #1a2b45;
             z-index: 10;
         }
         
         .video-container {
+            flex: 1;
+            min-height: 0;
             position: relative;
             background: #000;
         }
@@ -122,8 +131,11 @@
         }
         
         .telemetry-panel {
-            display: grid;
-            grid-template-rows: auto 1fr auto;
+            flex: 1;
+            min-width: 300px;
+            max-width: 30%;
+            display: flex;
+            flex-direction: column;
             background: rgba(10, 25, 47, 0.8);
             border-left: 1px solid rgba(100, 255, 218, 0.2);
             overflow: hidden;
@@ -210,15 +222,15 @@
             color: #5555ff;
         }
         
-        /* Responsive layout */
+        /* Mobile responsiveness */
         @media (max-width: 1200px) {
             .main-container {
-                grid-template-columns: 1fr;
-                grid-template-rows: 60vh 40vh;
+                flex-direction: column;
             }
+            
             .telemetry-panel {
-                border-left: none;
-                border-top: 1px solid rgba(100, 255, 218, 0.2);
+                max-width: 100%;
+                max-height: 40vh;
             }
         }
         
@@ -228,6 +240,9 @@
             }
             .flight-controls {
                 grid-template-columns: repeat(2, 1fr);
+            }
+            .controls {
+                flex-wrap: wrap;
             }
         }
     </style>

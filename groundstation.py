@@ -297,6 +297,89 @@ def get_flight(flight_id):
         return json.dumps(flight_history[flight_id])
     return json.dumps({'status': 'error', 'message': 'Flight not found'}), 404
 
+@app.route('/add_user', methods=['POST'])
+@login_required
+def add_user():
+    """Add a new user"""
+    if users[current_user.id]['role'] != 'admin':
+        return json.dumps({'status': 'error', 'message': 'Permission denied'}), 403
+    
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    role = data.get('role', 'viewer')
+    
+    if not username or not password:
+        return json.dumps({'status': 'error', 'message': 'Missing username or password'}), 400
+    
+    if username in users:
+        return json.dumps({'status': 'error', 'message': 'User already exists'}), 400
+    
+    users[username] = {
+        'password': generate_password_hash(password),
+        'role': role
+    }
+    
+    return json.dumps({'status': 'success', 'message': 'User created'})
+
+@app.route('/change_password', methods=['POST'])
+@login_required
+def change_password():
+    """Change user password"""
+    data = request.json
+    username = data.get('username')
+    new_password = data.get('new_password')
+    
+    if not username or not new_password:
+        return json.dumps({'status': 'error', 'message': 'Missing parameters'}), 400
+    
+    # Admins can change any password, users can only change their own
+    if current_user.id != username and users[current_user.id]['role'] != 'admin':
+        return json.dumps({'status': 'error', 'message': 'Permission denied'}), 403
+    
+    if username not in users:
+        return json.dumps({'status': 'error', 'message': 'User not found'}), 404
+    
+    users[username]['password'] = generate_password_hash(new_password)
+    return json.dumps({'status': 'success', 'message': 'Password updated'})
+
+@app.route('/delete_user', methods=['POST'])
+@login_required
+def delete_user():
+    """Delete a user"""
+    if users[current_user.id]['role'] != 'admin':
+        return json.dumps({'status': 'error', 'message': 'Permission denied'}), 403
+    
+    data = request.json
+    username = data.get('username')
+    
+    if not username:
+        return json.dumps({'status': 'error', 'message': 'Missing username'}), 400
+    
+    if username == current_user.id:
+        return json.dumps({'status': 'error', 'message': 'Cannot delete current user'}), 400
+    
+    if username not in users:
+        return json.dumps({'status': 'error', 'message': 'User not found'}), 404
+    
+    # Proper deletion
+    if username in users:
+        del users[username]
+        return json.dumps({'status': 'success', 'message': 'User deleted'})
+    else:
+        return json.dumps({'status': 'error', 'message': 'User not found'}), 404
+
+@app.route('/list_users')
+@login_required
+def list_users():
+    """List all users"""
+    if users[current_user.id]['role'] != 'admin':
+        return json.dumps({'status': 'error', 'message': 'Permission denied'}), 403
+    
+    # Return usernames and roles without passwords
+    user_list = [{'username': u, 'role': users[u]['role']} for u in users]
+    return json.dumps({'users': user_list})
+
 @app.route('/')
 @login_required
 def index():
