@@ -1,5 +1,7 @@
-opencv-contrib-python
 flask
+flask-login
+werkzeug
+opencv-python-headless
 pymavlink
 pyserial
 pygame
