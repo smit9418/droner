@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vehicle Management</title>
+    <style>
+        :root {
+            --dark-bg: #0a192f;
+            --card-bg: #112240;
+            --accent: #64ffda;
+            --text: #e6f1ff;
+            --online: #64ffda;
+            --offline: #ff5555;
+        }
+        body {
+            background: var(--dark-bg);
+            color: var(--text);
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .vehicles-container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .vehicles-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(100, 255, 218, 0.2);
+        }
+        .vehicles-header h1 {
+            color: var(--accent);
+        }
+        .back-btn {
+            background: var(--card-bg);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .devices-list {
+            display: grid;
+            gap: 15px;
+        }
+        .device-card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: transform 0.2s;
+        }
+        .device-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        .device-info h3 {
+            margin: 0 0 5px 0;
+            color: var(--accent);
+        }
+        .device-details {
+            display: flex;
+            gap: 15px;
+            font-size: 0.9rem;
+        }
+        .device-detail {
+            display: flex;
+            flex-direction: column;
+        }
+        .device-detail .label {
+            opacity: 0.7;
+            font-size: 0.8rem;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .status-online {
+            background: var(--online);
+        }
+        .status-offline {
+            background: var(--offline);
+        }
+        .device-actions button {
+            background: var(--accent);
+            color: var(--dark-bg);
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        .device-actions button:hover {
+            background: #52e0c4;
+        }
+        .device-actions button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        .scan-btn {
+            background: var(--accent);
+            color: var(--dark-bg);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-bottom: 20px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .scan-btn:hover {
+            background: #52e0c4;
+        }
+    </style>
+</head>
+<body>
+    <div class="vehicles-container">
+        <div class="vehicles-header">
+            <h1>Vehicle Management</h1>
+            <a href="/" class="back-btn">Back to Dashboard</a>
+        </div>
+        
+        <button class="scan-btn" id="scan-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                <path d="M11.5 8a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"/>
+                <path d="M0 8s3-5.5 8-5.5S16 8 16 8s-3 5.5-8 5.5S0 8 0 8zm8 3.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/>
+            </svg>
+            Scan for Devices
+        </button>
+        
+        <div class="devices-list">
+            {% for device in devices %}
+            <div class="device-card">
+                <div class="device-info">
+                    <h3>{{ device.name }}</h3>
+                    <div class="device-details">
+                        <div class="device-detail">
+                            <span class="label">IP Address</span>
+                            <span>{{ device.ip }}</span>
+                        </div>
+                        <div class="device-detail">
+                            <span class="label">MAC Address</span>
+                            <span>{{ device.mac }}</span>
+                        </div>
+                        <div class="device-detail">
+                            <span class="label">Status</span>
+                            <span>
+                                <span class="status-indicator {% if device.status == 'Online' %}status-online{% else %}status-offline{% endif %}"></span>
+                                {{ device.status if 'status' in device else 'Unknown' }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                <div class="device-actions">
+                    {% if device.status == 'Online' %}
+                    <button>Pair</button>
+                    {% else %}
+                    <button disabled>Pair</button>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('scan-btn').addEventListener('click', () => {
+            // Show loading state
+            const btn = document.getElementById('scan-btn');
+            btn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-repeat" viewBox="0 0 16 16">
+                    <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/>
+                    <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
+                </svg>
+                Scanning...
+            `;
+            
+            // Simulate scanning
+            setTimeout(() => {
+                // Refresh the page to show new devices
+                window.location.reload();
+            }, 2000);
+        });
+    </script>
+</body>
+</html>

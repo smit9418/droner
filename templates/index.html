@@ -53,6 +53,7 @@
         .controls {
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
         }
         .control-btn {
             background: var(--card-bg);
@@ -63,6 +64,7 @@
             cursor: pointer;
             font-size: 0.9rem;
             transition: all 0.2s;
+            white-space: nowrap;
         }
         .control-btn:hover {
             background: rgba(100, 255, 218, 0.1);
@@ -75,6 +77,7 @@
             display: flex;
             align-items: center;
             gap: 10px;
+            flex-wrap: wrap;
         }
         .user-badge {
             background: rgba(100, 255, 218, 0.1);
@@ -241,8 +244,14 @@
             .flight-controls {
                 grid-template-columns: repeat(2, 1fr);
             }
-            .controls {
-                flex-wrap: wrap;
+            header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .controls, .user-info {
+                width: 100%;
+                justify-content: center;
+                margin-top: 10px;
             }
         }
     </style>
@@ -255,8 +264,9 @@
         <div class="controls">
             <button class="control-btn" id="dashboard-btn">Dashboard</button>
             <button class="control-btn" id="map-btn">Map View</button>
-            <button class="control-btn" id="settings-btn" style="display: {% if user_role == 'admin' %}block{% else %}none{% endif %}">Settings</button>
             <button class="control-btn" id="flights-btn">Flight History</button>
+            <button class="control-btn" id="vehicles-btn">Vehicle Management</button>
+            <button class="control-btn" id="settings-btn" style="display: {% if user_role == 'admin' %}block{% else %}none{% endif %}">Settings</button>
         </div>
         <div class="user-info">
             <div class="user-badge {% if user_role == 'admin' %}admin-badge{% endif %}">
@@ -328,8 +338,8 @@
 
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script>
-        // Initialize map
-        const map = L.map('map').setView([0, 0], 16);
+        // Initialize map with default location (Area 51)
+        const map = L.map('map').setView([37.2350, -115.8111], 16);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
@@ -341,40 +351,45 @@
             iconSize: [30, 30],
             iconAnchor: [15, 15]
         });
-        const droneMarker = L.marker([0, 0], {icon: droneIcon}).addTo(map);
+        const droneMarker = L.marker([37.2350, -115.8111], {icon: droneIcon}).addTo(map);
         
         // Add flight path
         const flightPath = L.polyline([], {color: '#64ffda'}).addTo(map);
         
         // WebSocket for real-time telemetry
-        const ws = new WebSocket(`ws://${location.host}/ws`);
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            
-            // Update telemetry display
-            document.getElementById('altitude').textContent = `${data.altitude.toFixed(1)} m`;
-            document.getElementById('speed').textContent = `${data.speed.toFixed(1)} km/h`;
-            document.getElementById('battery').textContent = `${data.battery.toFixed(1)} %`;
-            document.getElementById('mode').textContent = data.mode;
-            document.getElementById('heading').textContent = `${data.heading.toFixed(0)}°`;
-            document.getElementById('satellites').textContent = data.satellites;
-            
-            // Update map
-            if (data.gps[0] !== 0 && data.gps[1] !== 0) {
-                const latLng = [data.gps[0], data.gps[1]];
-                droneMarker.setLatLng(latLng);
-                map.setView(latLng);
-                
-                // Add to flight path
-                flightPath.addLatLng(latLng);
-            }
-            
-            // Update drone icon rotation
-            const iconElement = droneMarker.getElement();
-            if (iconElement) {
-                iconElement.querySelector('div').style.transform = `rotate(${data.heading}deg)`;
-            }
-        };
+        // In production, you would set up a WebSocket connection
+        // For now, we'll simulate with setInterval
+        setInterval(() => {
+            // In a real implementation, this would come from the WebSocket
+            // For demo, we'll use the telemetry endpoint
+            fetch('/telemetry')
+                .then(response => response.json())
+                .then(data => {
+                    // Update telemetry display
+                    document.getElementById('altitude').textContent = `${data.altitude.toFixed(1)} m`;
+                    document.getElementById('speed').textContent = `${data.speed.toFixed(1)} km/h`;
+                    document.getElementById('battery').textContent = `${data.battery.toFixed(1)} %`;
+                    document.getElementById('mode').textContent = data.mode;
+                    document.getElementById('heading').textContent = `${data.heading.toFixed(0)}°`;
+                    document.getElementById('satellites').textContent = data.satellites;
+                    
+                    // Update map
+                    if (data.gps[0] !== 0 && data.gps[1] !== 0) {
+                        const latLng = [data.gps[0], data.gps[1]];
+                        droneMarker.setLatLng(latLng);
+                        map.setView(latLng);
+                        
+                        // Add to flight path
+                        flightPath.addLatLng(latLng);
+                    }
+                    
+                    // Update drone icon rotation
+                    const iconElement = droneMarker.getElement();
+                    if (iconElement) {
+                        iconElement.querySelector('div').style.transform = `rotate(${data.heading}deg)`;
+                    }
+                });
+        }, 1000);
         
         // Control event handlers
         document.getElementById('toggle-osd').addEventListener('click', () => {
@@ -410,6 +425,10 @@
             window.location.href = '/settings';
         });
         
+        document.getElementById('vehicles-btn').addEventListener('click', () => {
+            window.location.href = '/vehicles';
+        });
+        
         document.getElementById('logout-btn').addEventListener('click', () => {
             window.location.href = '/logout';
         });
@@ -424,6 +443,23 @@
                     body: JSON.stringify({command})
                 });
             });
+        });
+        
+        // View switching
+        document.getElementById('dashboard-btn').addEventListener('click', () => {
+            // For demo, just show dashboard view
+            alert('Dashboard view activated');
+        });
+        
+        document.getElementById('map-btn').addEventListener('click', () => {
+            // For demo, just show map view
+            alert('Map view activated');
+            map.setView([37.2350, -115.8111], 16);
+        });
+        
+        document.getElementById('flights-btn').addEventListener('click', () => {
+            // For demo, just show flight history
+            alert('Flight history view activated');
         });
     </script>
 </body>

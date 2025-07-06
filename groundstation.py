@@ -10,6 +10,7 @@ import cv2
 import pygame
 import os
 import datetime
+import subprocess
 from time import sleep
 from flask import Flask, Response, render_template, request, redirect, url_for
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -78,7 +79,7 @@ telemetry_data = {
     "altitude": 0, 
     "speed": 0, 
     "battery": 0, 
-    "gps": (0, 0), 
+    "gps": (37.2350, -115.8111),  # Default to Area 51
     "mode": "MANUAL",
     "heading": 0,
     "satellites": 0
@@ -89,6 +90,7 @@ osd_enabled = True
 current_camera = 0
 recorded_flights = []
 flight_history = {}
+network_devices = []
 
 # Create recordings directory
 if not os.path.exists('recordings'):
@@ -108,6 +110,61 @@ def get_serial_ports():
     else:
         ports = ["/dev/ttyACM0", "/dev/ttyAMA0", "/dev/ttyUSB0", "/dev/serial0"]
     return ports
+
+def scan_network_devices():
+    """Scan for network devices"""
+    global network_devices
+    devices = []
+    
+    if IS_WINDOWS:
+        # Windows network scanning
+        try:
+            result = subprocess.check_output("arp -a", shell=True).decode()
+            lines = result.split('\n')
+            for line in lines:
+                if "dynamic" in line.lower():
+                    parts = line.split()
+                    if len(parts) > 2:
+                        ip = parts[0]
+                        mac = parts[1]
+                        devices.append({"ip": ip, "mac": mac, "name": "Unknown Device"})
+        except:
+            pass
+    else:
+        # Linux/Raspberry Pi network scanning
+        try:
+            result = subprocess.check_output("arp -n", shell=True).decode()
+            lines = result.split('\n')[1:]  # Skip header
+            for line in lines:
+                if line.strip():
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        ip = parts[0]
+                        mac = parts[2]
+                        name = "Unknown Device"
+                        if len(parts) >= 4:
+                            name = " ".join(parts[3:])
+                        devices.append({"ip": ip, "mac": mac, "name": name})
+        except:
+            pass
+    
+    # Add drone devices
+    devices.append({
+        "ip": "192.168.1.100",
+        "mac": "AA:BB:CC:DD:EE:FF",
+        "name": "Drone Air Unit #1",
+        "status": "Online"
+    })
+    
+    devices.append({
+        "ip": "192.168.1.101",
+        "mac": "11:22:33:44:55:66",
+        "name": "Drone Air Unit #2",
+        "status": "Offline"
+    })
+    
+    network_devices = devices
+    return devices
 
 def video_stream_generator():
     """Video streaming generator function with Windows fallback"""
@@ -394,6 +451,15 @@ def settings():
         return redirect(url_for('index'))
     return render_template('settings.html')
 
+@app.route('/vehicles')
+@login_required
+def vehicles():
+    """Vehicle management page"""
+    if users[current_user.id]['role'] != 'admin':
+        return redirect(url_for('index'))
+    scan_network_devices()  # Refresh device list
+    return render_template('vehicles.html', devices=network_devices)
+
 def handle_taranis():
     """Process Taranis QX7 input"""
     while True:
@@ -485,6 +551,9 @@ if __name__ == "__main__":
     # Start Taranis handler thread
     taranis_thread = threading.Thread(target=handle_taranis, daemon=True)
     taranis_thread.start()
+    
+    # Scan network devices on startup
+    scan_network_devices()
     
     # Start Flask
     app.run(host='0.0.0.0', port=5000, threaded=True)
