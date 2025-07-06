@@ -10,7 +10,8 @@ import cv2
 import pygame
 import os
 import datetime
-from flask import Flask, Response, render_template, request, redirect, url_for, session
+from time import sleep
+from flask import Flask, Response, render_template, request, redirect, url_for
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from pymavlink import mavutil
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -109,25 +110,34 @@ def get_serial_ports():
     return ports
 
 def video_stream_generator():
-    """Video streaming generator function"""
+    """Video streaming generator function with Windows fallback"""
     cap = None
+    use_static_image = False
     
-    # Try to open camera
-    try:
-        cap = cv2.VideoCapture(current_camera)
-    except:
-        pass
+    if not IS_WINDOWS:
+        # Try to open camera on Raspberry Pi
+        try:
+            cap = cv2.VideoCapture(0)
+        except:
+            pass
+    else:
+        # On Windows, try different camera indices
+        for i in range(0, 3):
+            try:
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    print(f"📷 Using camera index {i}")
+                    break
+            except:
+                pass
     
     if cap is None or not cap.isOpened():
-        print("⚠️ Video capture not available!")
-        while True:
-            # Create a blank image with error message
-            img = np.zeros((480, 640, 3), dtype=np.uint8)
-            cv2.putText(img, "NO VIDEO SIGNAL", (100, 240), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-            _, jpeg = cv2.imencode('.jpg', img)
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+        print("⚠️ Video capture not available! Using static image fallback")
+        use_static_image = True
+        # Create a test image
+        img = np.zeros((480, 640, 3), dtype=np.uint8)
+        cv2.putText(img, "VIDEO UNAVAILABLE", (100, 240), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
     
     # Initialize video writer if recording
     recorder = None
@@ -135,49 +145,57 @@ def video_stream_generator():
     recording_start = None
     
     while True:
-        ret, frame = cap.read()
-        if ret:
-            # Add OSD overlay if enabled
-            if osd_enabled:
-                cv2.putText(frame, f"ALT: {telemetry_data['altitude']}m", (10, 30), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, f"SPD: {telemetry_data['speed']}km/h", (10, 60), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, f"BAT: {telemetry_data['battery']}%", (10, 90), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                cv2.putText(frame, f"MODE: {telemetry_data['mode']}", (10, 120), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            
-            # Record frame if recording
-            if recording:
-                if recorder is None:
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    filename = f"recordings/flight_{timestamp}.mp4"
-                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                    recorder = cv2.VideoWriter(filename, fourcc, 20.0, 
-                                             (frame.shape[1], frame.shape[0]))
-                    recording_start = datetime.datetime.now()
-                    telemetry_log = []
-                
-                recorder.write(frame)
-                # Log telemetry with timestamp
-                telemetry_log.append({
-                    'timestamp': (datetime.datetime.now() - recording_start).total_seconds(),
-                    'data': telemetry_data.copy()
-                })
-            
-            _, jpeg = cv2.imencode('.jpg', frame)
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
-        else:
-            # Create error frame if capture fails
-            img = np.zeros((480, 640, 3), dtype=np.uint8)
-            cv2.putText(img, "VIDEO ERROR", (100, 240), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        if use_static_image:
+            # Use the static test image
             _, jpeg = cv2.imencode('.jpg', img)
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+            sleep(0.1)  # Prevent high CPU usage
+        else:
+            ret, frame = cap.read()
+            if ret:
+                # Add OSD overlay if enabled
+                if osd_enabled:
+                    cv2.putText(frame, f"ALT: {telemetry_data['altitude']}m", (10, 30), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(frame, f"SPD: {telemetry_data['speed']}km/h", (10, 60), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(frame, f"BAT: {telemetry_data['battery']}%", (10, 90), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.putText(frame, f"MODE: {telemetry_data['mode']}", (10, 120), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                
+                # Record frame if recording
+                if recording:
+                    if recorder is None:
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        filename = f"recordings/flight_{timestamp}.mp4"
+                        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                        recorder = cv2.VideoWriter(filename, fourcc, 20.0, 
+                                                 (frame.shape[1], frame.shape[0]))
+                        recording_start = datetime.datetime.now()
+                        telemetry_log = []
+                    
+                    recorder.write(frame)
+                    # Log telemetry with timestamp
+                    telemetry_log.append({
+                        'timestamp': (datetime.datetime.now() - recording_start).total_seconds(),
+                        'data': telemetry_data.copy()
+                    })
+                
+                _, jpeg = cv2.imencode('.jpg', frame)
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+            else:
+                # Create error frame if capture fails
+                img = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(img, "VIDEO ERROR", (100, 240), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                _, jpeg = cv2.imencode('.jpg', img)
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
     
+    # Cleanup when generator exits
     if recorder:
         recorder.release()
         # Save telemetry log
@@ -193,6 +211,8 @@ def video_stream_generator():
             'date': timestamp
         }
         recorded_flights.append(flight_id)
+    if cap:
+        cap.release()
 
 @app.route('/video_feed')
 def video_feed():
@@ -248,6 +268,19 @@ def send_command():
     command = request.json.get('command')
     # Here you would send actual commands to the drone via MAVLink
     print(f"Sending command: {command}")
+    
+    # Simulate mode changes
+    if command == "ARM":
+        telemetry_data['mode'] = "ARMED"
+    elif command == "DISARM":
+        telemetry_data['mode'] = "DISARMED"
+    elif command == "RTL":
+        telemetry_data['mode'] = "RETURN TO LAUNCH"
+    elif command == "LOITER":
+        telemetry_data['mode'] = "LOITER"
+    elif command == "MISSION":
+        telemetry_data['mode'] = "AUTO MISSION"
+    
     return json.dumps({'status': 'success', 'command': command})
 
 @app.route('/flights')
