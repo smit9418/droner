@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-# groundstation.py - Cross-platform ground station
+# groundstation.py - Advanced Drone Ground Station
 import sys
 import json
 import socket
 import serial
 import threading
 import numpy as np
-from time import sleep
 import cv2
 import pygame
-from flask import Flask, Response, render_template, request
+import os
+import datetime
+from flask import Flask, Response, render_template, request, redirect, url_for, session
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from pymavlink import mavutil
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # Platform-specific configurations
 IS_WINDOWS = sys.platform == 'win32'
@@ -18,8 +21,77 @@ IS_RASPBERRY = 'linux' in sys.platform and 'raspberrypi' in sys.uname().release.
 
 # Initialize Flask
 app = Flask(__name__)
-telemetry_data = {"altitude": 0, "speed": 0, "battery": 0, "gps": (0, 0), "mode": "MANUAL"}
+app.secret_key = 'your_secret_key_here'  # Change this in production!
+
+# Initialize Login Manager
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+# User database (in production, use a real database)
+users = {
+    'admin': {
+        'password': generate_password_hash('adminpass'),
+        'role': 'admin'
+    },
+    'viewer': {
+        'password': generate_password_hash('viewerpass'),
+        'role': 'viewer'
+    }
+}
+
+class User(UserMixin):
+    pass
+
+@login_manager.user_loader
+def user_loader(username):
+    if username not in users:
+        return
+    user = User()
+    user.id = username
+    return user
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        
+        if username in users and check_password_hash(users[username]['password'], password):
+            user = User()
+            user.id = username
+            login_user(user)
+            return redirect(url_for('index'))
+        
+        return 'Invalid credentials'
+    return render_template('login.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+# Global state
+telemetry_data = {
+    "altitude": 0, 
+    "speed": 0, 
+    "battery": 0, 
+    "gps": (0, 0), 
+    "mode": "MANUAL",
+    "heading": 0,
+    "satellites": 0
+}
 ui_preset = "dashboard"
+recording = False
+osd_enabled = True
+current_camera = 0
+recorded_flights = []
+flight_history = {}
+
+# Create recordings directory
+if not os.path.exists('recordings'):
+    os.makedirs('recordings')
 
 def get_serial_ports():
     """Detect available serial ports"""
@@ -38,15 +110,15 @@ def get_serial_ports():
 
 def video_stream_generator():
     """Video streaming generator function"""
-    # Windows-specific camera setup
-    if IS_WINDOWS:
-        cap = cv2.VideoCapture(0)  # First USB camera
-        if not cap.isOpened():
-            cap = cv2.VideoCapture(1)  # Second USB camera
-    else:  # Raspberry Pi
-        cap = cv2.VideoCapture(0)  # USB capture device
-        
-    if not cap.isOpened():
+    cap = None
+    
+    # Try to open camera
+    try:
+        cap = cv2.VideoCapture(current_camera)
+    except:
+        pass
+    
+    if cap is None or not cap.isOpened():
         print("⚠️ Video capture not available!")
         while True:
             # Create a blank image with error message
@@ -57,14 +129,43 @@ def video_stream_generator():
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
     
+    # Initialize video writer if recording
+    recorder = None
+    telemetry_log = []
+    recording_start = None
+    
     while True:
         ret, frame = cap.read()
         if ret:
-            # Add telemetry overlay
-            cv2.putText(frame, f"ALT: {telemetry_data['altitude']}m", (10, 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(frame, f"BAT: {telemetry_data['battery']}%", (10, 60), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            # Add OSD overlay if enabled
+            if osd_enabled:
+                cv2.putText(frame, f"ALT: {telemetry_data['altitude']}m", (10, 30), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(frame, f"SPD: {telemetry_data['speed']}km/h", (10, 60), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(frame, f"BAT: {telemetry_data['battery']}%", (10, 90), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(frame, f"MODE: {telemetry_data['mode']}", (10, 120), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            # Record frame if recording
+            if recording:
+                if recorder is None:
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"recordings/flight_{timestamp}.mp4"
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    recorder = cv2.VideoWriter(filename, fourcc, 20.0, 
+                                             (frame.shape[1], frame.shape[0]))
+                    recording_start = datetime.datetime.now()
+                    telemetry_log = []
+                
+                recorder.write(frame)
+                # Log telemetry with timestamp
+                telemetry_log.append({
+                    'timestamp': (datetime.datetime.now() - recording_start).total_seconds(),
+                    'data': telemetry_data.copy()
+                })
+            
             _, jpeg = cv2.imencode('.jpg', frame)
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
@@ -76,6 +177,22 @@ def video_stream_generator():
             _, jpeg = cv2.imencode('.jpg', img)
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+    
+    if recorder:
+        recorder.release()
+        # Save telemetry log
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        with open(f"recordings/telemetry_{timestamp}.json", 'w') as f:
+            json.dump(telemetry_log, f)
+        
+        # Add to flight history
+        flight_id = f"flight_{timestamp}"
+        flight_history[flight_id] = {
+            'video': f"recordings/flight_{timestamp}.mp4",
+            'telemetry': f"recordings/telemetry_{timestamp}.json",
+            'date': timestamp
+        }
+        recorded_flights.append(flight_id)
 
 @app.route('/video_feed')
 def video_feed():
@@ -89,6 +206,7 @@ def telemetry_endpoint():
     return json.dumps(telemetry_data)
 
 @app.route('/set_preset', methods=['POST'])
+@login_required
 def set_preset():
     """Set UI preset"""
     global ui_preset
@@ -96,10 +214,69 @@ def set_preset():
     ui_preset = data.get('preset', 'dashboard')
     return "OK"
 
+@app.route('/toggle_osd', methods=['POST'])
+@login_required
+def toggle_osd():
+    """Toggle OSD display"""
+    global osd_enabled
+    osd_enabled = not osd_enabled
+    return json.dumps({'status': 'success', 'osd_enabled': osd_enabled})
+
+@app.route('/switch_camera', methods=['POST'])
+@login_required
+def switch_camera():
+    """Switch camera source"""
+    global current_camera
+    current_camera = (current_camera + 1) % 3  # Cycle through 3 cameras
+    return json.dumps({'status': 'success', 'camera': current_camera})
+
+@app.route('/toggle_recording', methods=['POST'])
+@login_required
+def toggle_recording():
+    """Start/stop flight recording"""
+    global recording
+    recording = not recording
+    return json.dumps({'status': 'success', 'recording': recording})
+
+@app.route('/send_command', methods=['POST'])
+@login_required
+def send_command():
+    """Send command to drone"""
+    if current_user.id != 'admin':
+        return json.dumps({'status': 'error', 'message': 'Permission denied'}), 403
+    
+    command = request.json.get('command')
+    # Here you would send actual commands to the drone via MAVLink
+    print(f"Sending command: {command}")
+    return json.dumps({'status': 'success', 'command': command})
+
+@app.route('/flights')
+@login_required
+def list_flights():
+    """List recorded flights"""
+    return json.dumps({'flights': recorded_flights})
+
+@app.route('/flight/<flight_id>')
+@login_required
+def get_flight(flight_id):
+    """Get flight data"""
+    if flight_id in flight_history:
+        return json.dumps(flight_history[flight_id])
+    return json.dumps({'status': 'error', 'message': 'Flight not found'}), 404
+
 @app.route('/')
+@login_required
 def index():
-    """Web UI interface"""
-    return render_template('index.html')
+    """Main UI interface"""
+    return render_template('index.html', user_role=users[current_user.id]['role'])
+
+@app.route('/settings')
+@login_required
+def settings():
+    """Settings page (admin only)"""
+    if users[current_user.id]['role'] != 'admin':
+        return redirect(url_for('index'))
+    return render_template('settings.html')
 
 def handle_taranis():
     """Process Taranis QX7 input"""
@@ -112,7 +289,6 @@ def handle_taranis():
                 while True:
                     data = taranis.readline()
                     # Process RC commands
-                    # Example: "CH1:1500,CH2:1200,..."
                     if b'CH' in data:
                         try:
                             channels = {}
@@ -142,10 +318,16 @@ def handle_telemetry():
         try:
             data, _ = sock.recvfrom(1024)
             # Parse MAVLink/INAV
-            # This is simplified - use pymavlink in real implementation
             if b'GPS' in data:
                 # Extract GPS data
                 pass
+            # Simulate telemetry updates
+            telemetry_data['altitude'] = (telemetry_data['altitude'] + 0.1) % 100
+            telemetry_data['speed'] = (telemetry_data['speed'] + 0.5) % 120
+            telemetry_data['battery'] = max(0, telemetry_data['battery'] - 0.01)
+            telemetry_data['heading'] = (telemetry_data['heading'] + 1) % 360
+            telemetry_data['satellites'] = 12
+            
         except socket.timeout:
             pass
         except Exception as e:
@@ -167,7 +349,6 @@ def handle_telemetry():
                 if elrs.in_waiting:
                     packet = elrs.read(elrs.in_waiting)
                     # Process CRSF protocol
-                    # Example: Update telemetry from ELRS
                     if len(packet) > 0 and packet[0] == 0x28:  # GPS packet
                         try:
                             lat = int.from_bytes(packet[1:5], 'big', signed=True)
@@ -180,88 +361,7 @@ def handle_telemetry():
                 elrs = None
         sleep(0.1)
 
-def draw_ui(screen):
-    """Render PyGame UI"""
-    global ui_preset
-    
-    screen.fill((0, 20, 40))  # Dark blue background
-    
-    # Draw UI based on preset
-    if ui_preset == "dashboard":
-        # Draw flight instruments
-        font = pygame.font.SysFont('Arial', 24)
-        alt_text = font.render(f"Altitude: {telemetry_data['altitude']}m", True, (0, 255, 0))
-        speed_text = font.render(f"Speed: {telemetry_data['speed']}km/h", True, (0, 255, 0))
-        bat_text = font.render(f"Battery: {telemetry_data['battery']}%", True, (0, 255, 0))
-        
-        screen.blit(alt_text, (50, 50))
-        screen.blit(speed_text, (50, 90))
-        screen.blit(bat_text, (50, 130))
-        
-        # Draw artificial horizon
-        pygame.draw.rect(screen, (30, 30, 60), (300, 100, 200, 150), 2)
-        
-    elif ui_preset == "map":
-        # Draw map background
-        pygame.draw.rect(screen, (20, 50, 20), (0, 0, screen.get_width(), screen.get_height()))
-        # Draw GPS position
-        try:
-            lat, lon = telemetry_data['gps']
-            # Scale GPS coordinates to screen
-            x = int(lat) % screen.get_width()
-            y = int(lon) % screen.get_height()
-            # Fixed syntax: properly closed circle function call
-            pygame.draw.circle(screen, (255, 0, 0), (x, y), 10)
-        except:
-            pass
-    
-    # Draw preset buttons
-    pygame.draw.rect(screen, (40, 40, 80), (10, 10, 120, 30))
-    pygame.draw.rect(screen, (40, 40, 80), (140, 10, 120, 30))
-    
-    font = pygame.font.SysFont('Arial', 18)
-    screen.blit(font.render("Dashboard", True, (255, 255, 255)), (20, 15))
-    screen.blit(font.render("Map View", True, (255, 255, 255)), (150, 15))
-    
-    pygame.display.flip()
-
-def run_pygame_ui():
-    """Run PyGame UI (for Raspberry Pi touchscreen)"""
-    global ui_preset
-    
-    if IS_WINDOWS:
-        screen = pygame.display.set_mode((800, 600))
-    else:
-        # Raspberry Pi touchscreen setup
-        pygame.init()
-        screen = pygame.display.set_mode((800, 480), pygame.FULLSCREEN)
-        pygame.mouse.set_visible(True)
-    
-    clock = pygame.time.Clock()
-    running = True
-    
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                x, y = event.pos
-                # Check button clicks
-                if 10 < x < 130 and 10 < y < 40:
-                    ui_preset = "dashboard"
-                elif 140 < x < 260 and 10 < y < 40:
-                    ui_preset = "map"
-                # Add more button regions as needed
-        
-        draw_ui(screen)
-        clock.tick(30)
-    
-    pygame.quit()
-
 if __name__ == "__main__":
-    # Initialize pygame for potential UI
-    pygame.init()
-    
     # Start telemetry thread
     telemetry_thread = threading.Thread(target=handle_telemetry, daemon=True)
     telemetry_thread.start()
@@ -270,22 +370,5 @@ if __name__ == "__main__":
     taranis_thread = threading.Thread(target=handle_taranis, daemon=True)
     taranis_thread.start()
     
-    # Start Flask in background
-    flask_thread = threading.Thread(target=app.run, 
-                                  kwargs={'host': '0.0.0.0', 'port': 5000, 'threaded': True})
-    flask_thread.daemon = True
-    flask_thread.start()
-    
-    # Run PyGame UI on Raspberry Pi
-    if IS_RASPBERRY:
-        run_pygame_ui()
-    else:
-        print("✅ Ground station running")
-        print(f"🌐 Web UI: http://localhost:5000")
-        print("Press Ctrl+C to exit")
-        try:
-            while True: 
-                sleep(1)
-        except KeyboardInterrupt:
-            pygame.quit()
-            sys.exit(0)
+    # Start Flask
+    app.run(host='0.0.0.0', port=5000, threaded=True)

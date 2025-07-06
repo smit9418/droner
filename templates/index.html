@@ -3,173 +3,413 @@
 <head>
     <title>Drone Ground Station</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <style>
         :root {
             --dark-bg: #0a192f;
             --card-bg: #112240;
             --accent: #64ffda;
             --text: #e6f1ff;
+            --warning: #ff5555;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
         body { 
             margin: 0; 
             background: var(--dark-bg); 
             color: var(--text);
             font-family: 'Segoe UI', Tahoma, sans-serif;
-        }
-        #container {
-            display: grid;
             height: 100vh;
-            grid-template-rows: auto 1fr auto;
+            overflow: hidden;
+            display: grid;
+            grid-template-rows: auto 1fr;
         }
         header {
-            background: rgba(10, 25, 47, 0.8);
-            padding: 15px;
+            background: rgba(10, 25, 47, 0.9);
+            padding: 10px 15px;
             display: flex;
             justify-content: space-between;
-            backdrop-filter: blur(10px);
+            align-items: center;
+            backdrop-filter: blur(5px);
+            border-bottom: 1px solid rgba(100, 255, 218, 0.2);
+            z-index: 1000;
         }
-        .preset-buttons {
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .logo h1 {
+            font-size: 1.2rem;
+            color: var(--accent);
+        }
+        .controls {
             display: flex;
             gap: 10px;
         }
-        .preset-btn {
+        .control-btn {
             background: var(--card-bg);
             border: 1px solid var(--accent);
             color: var(--accent);
             padding: 8px 15px;
             border-radius: 4px;
             cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
         }
-        .main-content {
+        .control-btn:hover {
+            background: rgba(100, 255, 218, 0.1);
+        }
+        .control-btn.active {
+            background: var(--accent);
+            color: var(--dark-bg);
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .user-badge {
+            background: rgba(100, 255, 218, 0.1);
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+        }
+        .admin-badge {
+            background: rgba(255, 85, 85, 0.2);
+            color: #ff5555;
+        }
+        
+        .main-container {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            padding: 15px;
+            grid-template-columns: 1fr 300px;
+            height: 100%;
+            overflow: hidden;
         }
-        @media (max-width: 768px) {
-            .main-content {
-                grid-template-columns: 1fr;
-            }
+        
+        .map-video-container {
+            display: grid;
+            grid-template-rows: 60% 40%;
+            position: relative;
         }
-        .card {
-            background: var(--card-bg);
-            border-radius: 8px;
-            padding: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        
+        #map {
+            background: #1a2b45;
+            z-index: 10;
         }
-        #video-card {
-            grid-column: span 2;
+        
+        .video-container {
+            position: relative;
+            background: #000;
         }
+        
         #video {
             width: 100%;
-            background: #000;
-            border-radius: 4px;
+            height: 100%;
+            object-fit: contain;
         }
+        
+        .video-controls {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            display: flex;
+            gap: 10px;
+            z-index: 20;
+        }
+        
+        .telemetry-panel {
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            background: rgba(10, 25, 47, 0.8);
+            border-left: 1px solid rgba(100, 255, 218, 0.2);
+            overflow: hidden;
+        }
+        
+        .telemetry-header {
+            padding: 15px;
+            border-bottom: 1px solid rgba(100, 255, 218, 0.2);
+        }
+        
         .telemetry-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 10px;
-            margin-top: 15px;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            padding: 15px;
+            overflow-y: auto;
         }
+        
         .telemetry-card {
             background: rgba(100, 255, 218, 0.1);
-            padding: 10px;
-            border-radius: 4px;
-            text-align: center;
+            padding: 15px;
+            border-radius: 8px;
         }
-        .value {
-            font-size: 24px;
+        
+        .telemetry-card .value {
+            font-size: 1.8rem;
             font-weight: bold;
             color: var(--accent);
+            margin: 5px 0;
         }
-        .label {
-            font-size: 12px;
+        
+        .telemetry-card .label {
+            font-size: 0.9rem;
             opacity: 0.7;
         }
-        footer {
+        
+        .warning-card {
+            background: rgba(255, 85, 85, 0.1);
+            border: 1px solid var(--warning);
+        }
+        
+        .warning-card .value {
+            color: var(--warning);
+        }
+        
+        .flight-controls {
             padding: 15px;
+            border-top: 1px solid rgba(100, 255, 218, 0.2);
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+        
+        .flight-btn {
+            background: var(--card-bg);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 12px;
+            border-radius: 8px;
+            cursor: pointer;
             text-align: center;
-            background: rgba(10, 25, 47, 0.8);
+            transition: all 0.2s;
+        }
+        
+        .flight-btn:hover {
+            background: rgba(100, 255, 218, 0.1);
+        }
+        
+        .flight-btn.arm {
+            background: rgba(255, 85, 85, 0.1);
+            border-color: var(--warning);
+            color: var(--warning);
+        }
+        
+        .flight-btn.loiter {
+            background: rgba(255, 255, 85, 0.1);
+            border-color: #ffff55;
+            color: #ffff55;
+        }
+        
+        .flight-btn.rtl {
+            background: rgba(85, 85, 255, 0.1);
+            border-color: #5555ff;
+            color: #5555ff;
+        }
+        
+        /* Responsive layout */
+        @media (max-width: 1200px) {
+            .main-container {
+                grid-template-columns: 1fr;
+                grid-template-rows: 60vh 40vh;
+            }
+            .telemetry-panel {
+                border-left: none;
+                border-top: 1px solid rgba(100, 255, 218, 0.2);
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .telemetry-grid {
+                grid-template-columns: 1fr;
+            }
+            .flight-controls {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
     </style>
 </head>
 <body>
-    <div id="container">
-        <header>
+    <header>
+        <div class="logo">
             <h1>Drone Ground Station</h1>
-            <div class="preset-buttons">
-                <div class="preset-btn" data-preset="dashboard">Dashboard</div>
-                <div class="preset-btn" data-preset="map">Map View</div>
-                <div class="preset-btn" data-preset="cinematic">Cinematic</div>
+        </div>
+        <div class="controls">
+            <button class="control-btn" id="dashboard-btn">Dashboard</button>
+            <button class="control-btn" id="map-btn">Map View</button>
+            <button class="control-btn" id="settings-btn" style="display: {% if user_role == 'admin' %}block{% else %}none{% endif %}">Settings</button>
+            <button class="control-btn" id="flights-btn">Flight History</button>
+        </div>
+        <div class="user-info">
+            <div class="user-badge {% if user_role == 'admin' %}admin-badge{% endif %}">
+                {{ current_user.id }} ({{ user_role }})
             </div>
-        </header>
-        
-        <div class="main-content">
-            <div class="card" id="video-card">
+            <button class="control-btn" id="logout-btn">Logout</button>
+        </div>
+    </header>
+    
+    <div class="main-container">
+        <div class="map-video-container">
+            <div id="map"></div>
+            <div class="video-container">
                 <img id="video" src="{{ url_for('video_feed') }}">
-            </div>
-            
-            <div class="card">
-                <h2>Flight Data</h2>
-                <div class="telemetry-grid">
-                    <div class="telemetry-card">
-                        <div class="value" id="altitude">0</div>
-                        <div class="label">ALTITUDE (m)</div>
-                    </div>
-                    <div class="telemetry-card">
-                        <div class="value" id="speed">0</div>
-                        <div class="label">SPEED (km/h)</div>
-                    </div>
-                    <div class="telemetry-card">
-                        <div class="value" id="battery">0</div>
-                        <div class="label">BATTERY (%)</div>
-                    </div>
-                    <div class="telemetry-card">
-                        <div class="value" id="satellites">0</div>
-                        <div class="label">SATELLITES</div>
-                    </div>
+                <div class="video-controls">
+                    <button class="control-btn" id="toggle-osd">OSD: ON</button>
+                    <button class="control-btn" id="switch-camera">Switch Camera</button>
+                    <button class="control-btn" id="record-btn">REC</button>
                 </div>
-            </div>
-            
-            <div class="card">
-                <h2>Map View</h2>
-                <div id="map" style="height: 200px; background: #1a2b45; border-radius: 4px;"></div>
             </div>
         </div>
         
-        <footer>
-            <div>Connection: <span id="connection-status">Active</span></div>
-        </footer>
+        <div class="telemetry-panel">
+            <div class="telemetry-header">
+                <h2>Flight Telemetry</h2>
+            </div>
+            <div class="telemetry-grid">
+                <div class="telemetry-card">
+                    <div class="label">ALTITUDE</div>
+                    <div class="value" id="altitude">0 m</div>
+                    <div class="label">Above ground level</div>
+                </div>
+                <div class="telemetry-card">
+                    <div class="label">SPEED</div>
+                    <div class="value" id="speed">0 km/h</div>
+                    <div class="label">Ground speed</div>
+                </div>
+                <div class="telemetry-card warning-card">
+                    <div class="label">BATTERY</div>
+                    <div class="value" id="battery">0 %</div>
+                    <div class="label">Remaining capacity</div>
+                </div>
+                <div class="telemetry-card">
+                    <div class="label">MODE</div>
+                    <div class="value" id="mode">MANUAL</div>
+                    <div class="label">Flight mode</div>
+                </div>
+                <div class="telemetry-card">
+                    <div class="label">HEADING</div>
+                    <div class="value" id="heading">0°</div>
+                    <div class="label">Compass direction</div>
+                </div>
+                <div class="telemetry-card">
+                    <div class="label">SATELLITES</div>
+                    <div class="value" id="satellites">0</div>
+                    <div class="label">GPS lock</div>
+                </div>
+            </div>
+            <div class="flight-controls">
+                <button class="flight-btn arm" id="arm-btn">ARM</button>
+                <button class="flight-btn" id="takeoff-btn">TAKEOFF</button>
+                <button class="flight-btn loiter" id="loiter-btn">LOITER</button>
+                <button class="flight-btn" id="mission-btn">MISSION</button>
+                <button class="flight-btn rtl" id="rtl-btn">RTL</button>
+                <button class="flight-btn" id="land-btn">LAND</button>
+            </div>
+        </div>
     </div>
 
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script>
+        // Initialize map
+        const map = L.map('map').setView([0, 0], 16);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+        
+        // Add drone marker
+        const droneIcon = L.divIcon({
+            className: 'drone-marker',
+            html: '<div style="transform: rotate(0deg);">✈</div>',
+            iconSize: [30, 30],
+            iconAnchor: [15, 15]
+        });
+        const droneMarker = L.marker([0, 0], {icon: droneIcon}).addTo(map);
+        
+        // Add flight path
+        const flightPath = L.polyline([], {color: '#64ffda'}).addTo(map);
+        
         // WebSocket for real-time telemetry
         const ws = new WebSocket(`ws://${location.host}/ws`);
-        
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            document.getElementById('altitude').textContent = data.altitude.toFixed(1);
-            document.getElementById('speed').textContent = data.speed.toFixed(1);
-            document.getElementById('battery').textContent = data.battery;
-            document.getElementById('satellites').textContent = data.satellites || 0;
+            
+            // Update telemetry display
+            document.getElementById('altitude').textContent = `${data.altitude.toFixed(1)} m`;
+            document.getElementById('speed').textContent = `${data.speed.toFixed(1)} km/h`;
+            document.getElementById('battery').textContent = `${data.battery.toFixed(1)} %`;
+            document.getElementById('mode').textContent = data.mode;
+            document.getElementById('heading').textContent = `${data.heading.toFixed(0)}°`;
+            document.getElementById('satellites').textContent = data.satellites;
+            
+            // Update map
+            if (data.gps[0] !== 0 && data.gps[1] !== 0) {
+                const latLng = [data.gps[0], data.gps[1]];
+                droneMarker.setLatLng(latLng);
+                map.setView(latLng);
+                
+                // Add to flight path
+                flightPath.addLatLng(latLng);
+            }
+            
+            // Update drone icon rotation
+            const iconElement = droneMarker.getElement();
+            if (iconElement) {
+                iconElement.querySelector('div').style.transform = `rotate(${data.heading}deg)`;
+            }
         };
         
-        // UI Preset Switching
-        document.querySelectorAll('.preset-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const preset = btn.dataset.preset;
-                fetch('/set_preset', {
+        // Control event handlers
+        document.getElementById('toggle-osd').addEventListener('click', () => {
+            fetch('/toggle_osd', {method: 'POST'})
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('toggle-osd').textContent = 
+                        `OSD: ${data.osd_enabled ? 'ON' : 'OFF'}`;
+                });
+        });
+        
+        document.getElementById('switch-camera').addEventListener('click', () => {
+            fetch('/switch_camera', {method: 'POST'})
+                .then(res => res.json())
+                .then(data => {
+                    // Force video reload
+                    const video = document.getElementById('video');
+                    video.src = video.src;
+                });
+        });
+        
+        document.getElementById('record-btn').addEventListener('click', () => {
+            fetch('/toggle_recording', {method: 'POST'})
+                .then(res => res.json())
+                .then(data => {
+                    const btn = document.getElementById('record-btn');
+                    btn.textContent = data.recording ? 'STOP REC' : 'REC';
+                    btn.style.background = data.recording ? '#ff5555' : '';
+                });
+        });
+        
+        document.getElementById('settings-btn').addEventListener('click', () => {
+            window.location.href = '/settings';
+        });
+        
+        document.getElementById('logout-btn').addEventListener('click', () => {
+            window.location.href = '/logout';
+        });
+        
+        // Flight control buttons
+        document.querySelectorAll('.flight-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const command = this.id.replace('-btn', '').toUpperCase();
+                fetch('/send_command', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({preset})
+                    body: JSON.stringify({command})
                 });
             });
         });
-        
-        // Initialize map (using Leaflet.js in real implementation)
-        // For demo purposes only
-        const mapEl = document.getElementById('map');
-        mapEl.innerHTML = '<div style="padding:20px;text-align:center;">Map View<br><small>(Satellite view would appear here)</small></div>';
     </script>
 </body>
 </html>

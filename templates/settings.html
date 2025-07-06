@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Settings</title>
+    <style>
+        :root {
+            --dark-bg: #0a192f;
+            --card-bg: #112240;
+            --accent: #64ffda;
+            --text: #e6f1ff;
+        }
+        body {
+            background: var(--dark-bg);
+            color: var(--text);
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .settings-container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .settings-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(100, 255, 218, 0.2);
+        }
+        .settings-header h1 {
+            color: var(--accent);
+        }
+        .back-btn {
+            background: var(--card-bg);
+            border: 1px solid var(--accent);
+            color: var(--accent);
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .settings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .settings-card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .settings-card h2 {
+            margin-top: 0;
+            color: var(--accent);
+            font-size: 1.2rem;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(100, 255, 218, 0.2);
+            margin-bottom: 15px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid rgba(100, 255, 218, 0.3);
+            background: rgba(10, 25, 47, 0.5);
+            color: var(--text);
+            border-radius: 4px;
+        }
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .btn {
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: none;
+            font-weight: bold;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: var(--dark-bg);
+        }
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--accent);
+            color: var(--accent);
+        }
+        .users-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .user-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .user-item:last-child {
+            border-bottom: none;
+        }
+        .user-actions {
+            display: flex;
+            gap: 5px;
+        }
+        .user-action-btn {
+            background: transparent;
+            border: none;
+            color: var(--accent);
+            cursor: pointer;
+        }
+        .flight-item {
+            padding: 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+        }
+        .flight-item:hover {
+            background: rgba(100, 255, 218, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="settings-container">
+        <div class="settings-header">
+            <h1>Admin Settings</h1>
+            <a href="/" class="back-btn">Back to Dashboard</a>
+        </div>
+        
+        <div class="settings-grid">
+            <!-- Network Settings -->
+            <div class="settings-card">
+                <h2>Network Configuration</h2>
+                <div class="form-group">
+                    <label>Connection Type</label>
+                    <select>
+                        <option>WiFi Client</option>
+                        <option>WiFi Access Point</option>
+                        <option>Ethernet</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>IP Address</label>
+                    <input type="text" value="192.168.1.100">
+                </div>
+                <div class="form-group">
+                    <label>Subnet Mask</label>
+                    <input type="text" value="255.255.255.0">
+                </div>
+                <div class="form-group">
+                    <label>Gateway</label>
+                    <input type="text" value="192.168.1.1">
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary">Apply</button>
+                    <button class="btn btn-secondary">Reset</button>
+                </div>
+            </div>
+            
+            <!-- Video Settings -->
+            <div class="settings-card">
+                <h2>Video Configuration</h2>
+                <div class="form-group">
+                    <label>Default Camera</label>
+                    <select id="camera-select">
+                        <option value="0">Camera 1</option>
+                        <option value="1">Camera 2</option>
+                        <option value="2">Camera 3</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Video Resolution</label>
+                    <select>
+                        <option>640x480</option>
+                        <option>1280x720</option>
+                        <option>1920x1080</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Frame Rate</label>
+                    <select>
+                        <option>30 FPS</option>
+                        <option>60 FPS</option>
+                        <option>120 FPS</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="osd-toggle" checked> 
+                        Enable OSD (On-Screen Display)
+                    </label>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary">Save</button>
+                </div>
+            </div>
+            
+            <!-- User Management -->
+            <div class="settings-card">
+                <h2>User Management</h2>
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="new-username" placeholder="Enter username">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="new-password" placeholder="Enter password">
+                </div>
+                <div class="form-group">
+                    <label>Role</label>
+                    <select id="new-role">
+                        <option value="admin">Admin</option>
+                        <option value="viewer">Viewer</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary" style="width: 100%;">Add User</button>
+                
+                <h3 style="margin-top: 20px;">Existing Users</h3>
+                <div class="users-list">
+                    <div class="user-item">
+                        <div>
+                            <strong>admin</strong> (Admin)
+                        </div>
+                        <div class="user-actions">
+                            <button class="user-action-btn">Edit</button>
+                            <button class="user-action-btn">Delete</button>
+                        </div>
+                    </div>
+                    <div class="user-item">
+                        <div>
+                            <strong>viewer</strong> (Viewer)
+                        </div>
+                        <div class="user-actions">
+                            <button class="user-action-btn">Edit</button>
+                            <button class="user-action-btn">Delete</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Flight History -->
+            <div class="settings-card">
+                <h2>Flight History</h2>
+                <div id="flights-list" style="max-height: 300px; overflow-y: auto;">
+                    <div class="flight-item">
+                        <div><strong>Flight 20231015_143022</strong></div>
+                        <div>Oct 15, 2023 14:30</div>
+                        <div>Duration: 12:45</div>
+                    </div>
+                    <div class="flight-item">
+                        <div><strong>Flight 20231014_092156</strong></div>
+                        <div>Oct 14, 2023 09:21</div>
+                        <div>Duration: 08:22</div>
+                    </div>
+                    <div class="flight-item">
+                        <div><strong>Flight 20231012_161045</strong></div>
+                        <div>Oct 12, 2023 16:10</div>
+                        <div>Duration: 15:33</div>
+                    </div>
+                </div>
+                <div class="btn-group" style="margin-top: 15px;">
+                    <button class="btn btn-primary">Play Selected</button>
+                    <button class="btn btn-secondary">Export Data</button>
+                </div>
+            </div>
+            
+            <!-- System Settings -->
+            <div class="settings-card">
+                <h2>System Configuration</h2>
+                <div class="form-group">
+                    <label>Telemetry Protocol</label>
+                    <select>
+                        <option>MAVLink</option>
+                        <option>FrSky</option>
+                        <option>CRSF</option>
+                        <option>DJI</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Map Provider</label>
+                    <select>
+                        <option>OpenStreetMap</option>
+                        <option>Google Maps</option>
+                        <option>Mapbox</option>
+                        <option>Bing Maps</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>UI Theme</label>
+                    <select>
+                        <option>Dark (Default)</option>
+                        <option>Light</option>
+                        <option>High Contrast</option>
+                    </select>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary">Apply</button>
+                </div>
+            </div>
+            
+            <!-- Advanced Controls -->
+            <div class="settings-card">
+                <h2>Advanced Controls</h2>
+                <div class="form-group">
+                    <label>Flight Controller Parameters</label>
+                    <textarea rows="4" style="width: 100%; background: rgba(10, 25, 47, 0.5); color: var(--text); border: 1px solid rgba(100, 255, 218, 0.3); padding: 10px;"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Radio Configuration</label>
+                    <textarea rows="4" style="width: 100%; background: rgba(10, 25, 47, 0.5); color: var(--text); border: 1px solid rgba(100, 255, 218, 0.3); padding: 10px;"></textarea>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-primary">Upload Parameters</button>
+                    <button class="btn btn-secondary">Reset to Defaults</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Load current settings
+        document.addEventListener('DOMContentLoaded', () => {
+            // Set current camera
+            fetch('/get_settings')
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('camera-select').value = data.camera;
+                    document.getElementById('osd-toggle').checked = data.osd_enabled;
+                });
+                
+            // Add event listeners
+            document.getElementById('camera-select').addEventListener('change', (e) => {
+                fetch('/switch_camera', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({camera: e.target.value})
+                });
+            });
+            
+            document.getElementById('osd-toggle').addEventListener('change', (e) => {
+                fetch('/toggle_osd', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({state: e.target.checked})
+                });
+            });
+        });
+    </script>
+</body>
+</html>
