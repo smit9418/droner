@@ -1,44 +1,32 @@
 #!/usr/bin/env python3
-# groundstation.py - Advanced Drone Ground Station
-import sys
-import json
-import socket
-import serial
-import threading
-import numpy as np
-import cv2
-import pygame
-import os
-import datetime
-import subprocess
-from time import sleep
-from flask import Flask, Response, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify, Response
+from flask_socketio import SocketIO
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from pymavlink import mavutil
 from werkzeug.security import generate_password_hash, check_password_hash
+import threading
+import time
+import json
+import os
+import cv2
+import numpy as np
 
-# Platform-specific configurations
-IS_WINDOWS = sys.platform == 'win32'
-IS_RASPBERRY = 'linux' in sys.platform and 'raspberrypi' in sys.uname().release.lower()
-
-# Initialize Flask
+# Initialize Flask app
 app = Flask(__name__)
-app.secret_key = 'your_secret_key_here'  # Change this in production!
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
 
-# Initialize Login Manager
+# Initialize SocketIO
+socketio = SocketIO(app, async_mode='threading')
+
+# Login Manager Setup
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# User database (in production, use a real database)
+# User Management
 users = {
     'admin': {
-        'password': generate_password_hash('adminpass'),
+        'password': generate_password_hash(os.getenv('ADMIN_PASSWORD', 'adminpass')),
         'role': 'admin'
-    },
-    'viewer': {
-        'password': generate_password_hash('viewerpass'),
-        'role': 'viewer'
     }
 }
 
@@ -53,6 +41,62 @@ def user_loader(username):
     user.id = username
     return user
 
+# Video Feed Generation
+def generate_frames():
+    camera = cv2.VideoCapture(0)  # Use 0 for default camera
+    while True:
+        success, frame = camera.read()
+        if not success:
+            # Generate test pattern if camera fails
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(frame, "DRONE CAMERA FEED", (100, 240), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+        ret, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+# Device Manager
+class DeviceManager:
+    def __init__(self):
+        self.devices = {}
+        self.telemetry = {}
+    
+    def add_device(self, device_info):
+        device_id = device_info['mac']
+        self.devices[device_id] = {
+            **device_info,
+            'last_seen': time.time(),
+            'signal_strength': 0,
+            'status': 'connected'
+        }
+        self.update_clients()
+    
+    def update_telemetry(self, device_id, data):
+        self.telemetry[device_id] = data
+        self.devices[device_id]['last_seen'] = time.time()
+        self.update_clients()
+    
+    def update_signal(self, device_id, strength):
+        if device_id in self.devices:
+            self.devices[device_id]['signal_strength'] = strength
+            self.update_clients()
+    
+    def update_clients(self):
+        socketio.emit('device_update', {
+            'devices': list(self.devices.values()),
+            'telemetry': self.telemetry
+        })
+
+device_manager = DeviceManager()
+
+# Routes
+@app.route('/')
+@login_required
+def index():
+    return render_template('index.html', user_role=users[current_user.id]['role'])
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -65,7 +109,8 @@ def login():
             login_user(user)
             return redirect(url_for('index'))
         
-        return 'Invalid credentials'
+        return 'Invalid credentials', 401
+    
     return render_template('login.html')
 
 @app.route('/logout')
@@ -74,486 +119,69 @@ def logout():
     logout_user()
     return redirect(url_for('login'))
 
-# Global state
-telemetry_data = {
-    "altitude": 0, 
-    "speed": 0, 
-    "battery": 0, 
-    "gps": (37.2350, -115.8111),  # Default to Area 51
-    "mode": "MANUAL",
-    "heading": 0,
-    "satellites": 0
-}
-ui_preset = "dashboard"
-recording = False
-osd_enabled = True
-current_camera = 0
-recorded_flights = []
-flight_history = {}
-network_devices = []
-
-# Create recordings directory
-if not os.path.exists('recordings'):
-    os.makedirs('recordings')
-
-def get_serial_ports():
-    """Detect available serial ports"""
-    ports = []
-    if IS_WINDOWS:
-        for i in range(1, 20):
-            try:
-                s = serial.Serial(f"COM{i}")
-                ports.append(f"COM{i}")
-                s.close()
-            except: 
-                pass
-    else:
-        ports = ["/dev/ttyACM0", "/dev/ttyAMA0", "/dev/ttyUSB0", "/dev/serial0"]
-    return ports
-
-def scan_network_devices():
-    """Scan for network devices"""
-    global network_devices
-    devices = []
-    
-    if IS_WINDOWS:
-        # Windows network scanning
-        try:
-            result = subprocess.check_output("arp -a", shell=True).decode()
-            lines = result.split('\n')
-            for line in lines:
-                if "dynamic" in line.lower():
-                    parts = line.split()
-                    if len(parts) > 2:
-                        ip = parts[0]
-                        mac = parts[1]
-                        devices.append({"ip": ip, "mac": mac, "name": "Unknown Device"})
-        except:
-            pass
-    else:
-        # Linux/Raspberry Pi network scanning
-        try:
-            result = subprocess.check_output("arp -n", shell=True).decode()
-            lines = result.split('\n')[1:]  # Skip header
-            for line in lines:
-                if line.strip():
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        ip = parts[0]
-                        mac = parts[2]
-                        name = "Unknown Device"
-                        if len(parts) >= 4:
-                            name = " ".join(parts[3:])
-                        devices.append({"ip": ip, "mac": mac, "name": name})
-        except:
-            pass
-    
-    # Add drone devices
-    devices.append({
-        "ip": "192.168.1.100",
-        "mac": "AA:BB:CC:DD:EE:FF",
-        "name": "Drone Air Unit #1",
-        "status": "Online"
-    })
-    
-    devices.append({
-        "ip": "192.168.1.101",
-        "mac": "11:22:33:44:55:66",
-        "name": "Drone Air Unit #2",
-        "status": "Offline"
-    })
-    
-    network_devices = devices
-    return devices
-
-def video_stream_generator():
-    """Video streaming generator function with Windows fallback"""
-    cap = None
-    use_static_image = False
-    
-    if not IS_WINDOWS:
-        # Try to open camera on Raspberry Pi
-        try:
-            cap = cv2.VideoCapture(0)
-        except:
-            pass
-    else:
-        # On Windows, try different camera indices
-        for i in range(0, 3):
-            try:
-                cap = cv2.VideoCapture(i)
-                if cap.isOpened():
-                    print(f"📷 Using camera index {i}")
-                    break
-            except:
-                pass
-    
-    if cap is None or not cap.isOpened():
-        print("⚠️ Video capture not available! Using static image fallback")
-        use_static_image = True
-        # Create a test image
-        img = np.zeros((480, 640, 3), dtype=np.uint8)
-        cv2.putText(img, "VIDEO UNAVAILABLE", (100, 240), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-    
-    # Initialize video writer if recording
-    recorder = None
-    telemetry_log = []
-    recording_start = None
-    
-    while True:
-        if use_static_image:
-            # Use the static test image
-            _, jpeg = cv2.imencode('.jpg', img)
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
-            sleep(0.1)  # Prevent high CPU usage
-        else:
-            ret, frame = cap.read()
-            if ret:
-                # Add OSD overlay if enabled
-                if osd_enabled:
-                    cv2.putText(frame, f"ALT: {telemetry_data['altitude']}m", (10, 30), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    cv2.putText(frame, f"SPD: {telemetry_data['speed']}km/h", (10, 60), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    cv2.putText(frame, f"BAT: {telemetry_data['battery']}%", (10, 90), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                    cv2.putText(frame, f"MODE: {telemetry_data['mode']}", (10, 120), 
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                
-                # Record frame if recording
-                if recording:
-                    if recorder is None:
-                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        filename = f"recordings/flight_{timestamp}.mp4"
-                        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                        recorder = cv2.VideoWriter(filename, fourcc, 20.0, 
-                                                 (frame.shape[1], frame.shape[0]))
-                        recording_start = datetime.datetime.now()
-                        telemetry_log = []
-                    
-                    recorder.write(frame)
-                    # Log telemetry with timestamp
-                    telemetry_log.append({
-                        'timestamp': (datetime.datetime.now() - recording_start).total_seconds(),
-                        'data': telemetry_data.copy()
-                    })
-                
-                _, jpeg = cv2.imencode('.jpg', frame)
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
-            else:
-                # Create error frame if capture fails
-                img = np.zeros((480, 640, 3), dtype=np.uint8)
-                cv2.putText(img, "VIDEO ERROR", (100, 240), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                _, jpeg = cv2.imencode('.jpg', img)
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
-    
-    # Cleanup when generator exits
-    if recorder:
-        recorder.release()
-        # Save telemetry log
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        with open(f"recordings/telemetry_{timestamp}.json", 'w') as f:
-            json.dump(telemetry_log, f)
-        
-        # Add to flight history
-        flight_id = f"flight_{timestamp}"
-        flight_history[flight_id] = {
-            'video': f"recordings/flight_{timestamp}.mp4",
-            'telemetry': f"recordings/telemetry_{timestamp}.json",
-            'date': timestamp
-        }
-        recorded_flights.append(flight_id)
-    if cap:
-        cap.release()
-
 @app.route('/video_feed')
+@login_required
 def video_feed():
-    """Video streaming route"""
-    return Response(video_stream_generator(),
+    return Response(generate_frames(),
                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.route('/telemetry')
-def telemetry_endpoint():
-    """Telemetry data endpoint"""
-    return json.dumps(telemetry_data)
-
-@app.route('/set_preset', methods=['POST'])
+@app.route('/api/device/settings', methods=['POST'])
 @login_required
-def set_preset():
-    """Set UI preset"""
-    global ui_preset
+def device_settings():
     data = request.json
-    ui_preset = data.get('preset', 'dashboard')
-    return "OK"
+    device_id = data.get('device_id')
+    settings = data.get('settings')
+    
+    if device_id in device_manager.devices:
+        # Send settings to device (implementation specific)
+        return jsonify({'status': 'success'})
+    return jsonify({'status': 'error', 'message': 'Device not found'}), 404
 
-@app.route('/toggle_osd', methods=['POST'])
-@login_required
-def toggle_osd():
-    """Toggle OSD display"""
-    global osd_enabled
-    osd_enabled = not osd_enabled
-    return json.dumps({'status': 'success', 'osd_enabled': osd_enabled})
+# SocketIO Events
+@socketio.on('connect')
+def handle_connect():
+    emit('device_update', {
+        'devices': list(device_manager.devices.values()),
+        'telemetry': device_manager.telemetry
+    })
 
-@app.route('/switch_camera', methods=['POST'])
-@login_required
-def switch_camera():
-    """Switch camera source"""
-    global current_camera
-    current_camera = (current_camera + 1) % 3  # Cycle through 3 cameras
-    return json.dumps({'status': 'success', 'camera': current_camera})
+@socketio.on('set_layout')
+def handle_set_layout(preset):
+    emit('layout_update', {'preset': preset}, broadcast=True)
 
-@app.route('/toggle_recording', methods=['POST'])
-@login_required
-def toggle_recording():
-    """Start/stop flight recording"""
-    global recording
-    recording = not recording
-    return json.dumps({'status': 'success', 'recording': recording})
-
-@app.route('/send_command', methods=['POST'])
-@login_required
-def send_command():
-    """Send command to drone"""
-    if current_user.id != 'admin':
-        return json.dumps({'status': 'error', 'message': 'Permission denied'}), 403
-    
-    command = request.json.get('command')
-    # Here you would send actual commands to the drone via MAVLink
-    print(f"Sending command: {command}")
-    
-    # Simulate mode changes
-    if command == "ARM":
-        telemetry_data['mode'] = "ARMED"
-    elif command == "DISARM":
-        telemetry_data['mode'] = "DISARMED"
-    elif command == "RTL":
-        telemetry_data['mode'] = "RETURN TO LAUNCH"
-    elif command == "LOITER":
-        telemetry_data['mode'] = "LOITER"
-    elif command == "MISSION":
-        telemetry_data['mode'] = "AUTO MISSION"
-    
-    return json.dumps({'status': 'success', 'command': command})
-
-@app.route('/flights')
-@login_required
-def list_flights():
-    """List recorded flights"""
-    return json.dumps({'flights': recorded_flights})
-
-@app.route('/flight/<flight_id>')
-@login_required
-def get_flight(flight_id):
-    """Get flight data"""
-    if flight_id in flight_history:
-        return json.dumps(flight_history[flight_id])
-    return json.dumps({'status': 'error', 'message': 'Flight not found'}), 404
-
-@app.route('/add_user', methods=['POST'])
-@login_required
-def add_user():
-    """Add a new user"""
-    if users[current_user.id]['role'] != 'admin':
-        return json.dumps({'status': 'error', 'message': 'Permission denied'}), 403
-    
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
-    role = data.get('role', 'viewer')
-    
-    if not username or not password:
-        return json.dumps({'status': 'error', 'message': 'Missing username or password'}), 400
-    
-    if username in users:
-        return json.dumps({'status': 'error', 'message': 'User already exists'}), 400
-    
-    users[username] = {
-        'password': generate_password_hash(password),
-        'role': role
-    }
-    
-    return json.dumps({'status': 'success', 'message': 'User created'})
-
-@app.route('/change_password', methods=['POST'])
-@login_required
-def change_password():
-    """Change user password"""
-    data = request.json
-    username = data.get('username')
-    new_password = data.get('new_password')
-    
-    if not username or not new_password:
-        return json.dumps({'status': 'error', 'message': 'Missing parameters'}), 400
-    
-    # Admins can change any password, users can only change their own
-    if current_user.id != username and users[current_user.id]['role'] != 'admin':
-        return json.dumps({'status': 'error', 'message': 'Permission denied'}), 403
-    
-    if username not in users:
-        return json.dumps({'status': 'error', 'message': 'User not found'}), 404
-    
-    users[username]['password'] = generate_password_hash(new_password)
-    return json.dumps({'status': 'success', 'message': 'Password updated'})
-
-@app.route('/delete_user', methods=['POST'])
-@login_required
-def delete_user():
-    """Delete a user"""
-    if users[current_user.id]['role'] != 'admin':
-        return json.dumps({'status': 'error', 'message': 'Permission denied'}), 403
-    
-    data = request.json
-    username = data.get('username')
-    
-    if not username:
-        return json.dumps({'status': 'error', 'message': 'Missing username'}), 400
-    
-    if username == current_user.id:
-        return json.dumps({'status': 'error', 'message': 'Cannot delete current user'}), 400
-    
-    if username not in users:
-        return json.dumps({'status': 'error', 'message': 'User not found'}), 404
-    
-    # Proper deletion
-    if username in users:
-        del users[username]
-        return json.dumps({'status': 'success', 'message': 'User deleted'})
-    else:
-        return json.dumps({'status': 'error', 'message': 'User not found'}), 404
-
-@app.route('/list_users')
-@login_required
-def list_users():
-    """List all users"""
-    if users[current_user.id]['role'] != 'admin':
-        return json.dumps({'status': 'error', 'message': 'Permission denied'}), 403
-    
-    # Return usernames and roles without passwords
-    user_list = [{'username': u, 'role': users[u]['role']} for u in users]
-    return json.dumps({'users': user_list})
-
-@app.route('/')
-@login_required
-def index():
-    """Main UI interface"""
-    return render_template('index.html', user_role=users[current_user.id]['role'])
-
-@app.route('/settings')
-@login_required
-def settings():
-    """Settings page (admin only)"""
-    if users[current_user.id]['role'] != 'admin':
-        return redirect(url_for('index'))
-    return render_template('settings.html')
-
-@app.route('/vehicles')
-@login_required
-def vehicles():
-    """Vehicle management page"""
-    if users[current_user.id]['role'] != 'admin':
-        return redirect(url_for('index'))
-    scan_network_devices()  # Refresh device list
-    return render_template('vehicles.html', devices=network_devices)
-
-def handle_taranis():
-    """Process Taranis QX7 input"""
+# Background Threads
+def telemetry_thread():
     while True:
-        ports = get_serial_ports()
-        for port in ports:
-            try:
-                taranis = serial.Serial(port, 57600, timeout=1)
-                print(f"📡 Connected to Taranis at {port}")
-                while True:
-                    data = taranis.readline()
-                    # Process RC commands
-                    if b'CH' in data:
-                        try:
-                            channels = {}
-                            parts = data.decode().strip().split(',')
-                            for part in parts:
-                                if ':' in part:
-                                    ch, val = part.split(':')
-                                    channels[ch] = int(val)
-                            telemetry_data['rc'] = channels
-                        except Exception as e:
-                            print(f"Error processing Taranis data: {str(e)}")
-            except Exception as e:
-                print(f"❌ Taranis error on {port}: {str(e)}")
-                sleep(1)
+        # Simulate telemetry updates
+        for device_id in device_manager.devices:
+            device_manager.update_telemetry(device_id, {
+                'altitude': round(time.time() % 100, 1),
+                'speed': round(time.time() % 50, 1),
+                'battery': 100 - (time.time() % 100),
+                'signal': device_manager.devices[device_id]['signal_strength']
+            })
+        time.sleep(0.5)
 
-def handle_telemetry():
-    """Receive and process telemetry data"""
-    # UDP for MAVLink/INAV
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('0.0.0.0', 14550))
-    sock.settimeout(1.0)
+def simulate_devices():
+    # Add some test devices
+    device_manager.add_device({
+        'id': 'drone1',
+        'name': 'Primary Drone',
+        'mac': '00:11:22:33:44:55',
+        'ip': '192.168.1.100',
+        'type': 'airside'
+    })
     
-    elrs = None
-    
+    # Simulate signal strength changes
     while True:
-        # UDP telemetry
-        try:
-            data, _ = sock.recvfrom(1024)
-            # Parse MAVLink/INAV
-            if b'GPS' in data:
-                # Extract GPS data
-                pass
-            # Simulate telemetry updates
-            telemetry_data['altitude'] = (telemetry_data['altitude'] + 0.1) % 100
-            telemetry_data['speed'] = (telemetry_data['speed'] + 0.5) % 120
-            telemetry_data['battery'] = max(0, telemetry_data['battery'] - 0.01)
-            telemetry_data['heading'] = (telemetry_data['heading'] + 1) % 360
-            telemetry_data['satellites'] = 12
-            
-        except socket.timeout:
-            pass
-        except Exception as e:
-            print(f"UDP error: {str(e)}")
-        
-        # ExpressLRS telemetry
-        if elrs is None:
-            ports = get_serial_ports()
-            for port in ports:
-                try:
-                    elrs = serial.Serial(port, 115200, timeout=1)
-                    print(f"📶 Connected to ExpressLRS at {port}")
-                    break
-                except:
-                    continue
-        
-        if elrs:
-            try:
-                if elrs.in_waiting:
-                    packet = elrs.read(elrs.in_waiting)
-                    # Process CRSF protocol
-                    if len(packet) > 0 and packet[0] == 0x28:  # GPS packet
-                        try:
-                            lat = int.from_bytes(packet[1:5], 'big', signed=True)
-                            lon = int.from_bytes(packet[5:9], 'big', signed=True)
-                            telemetry_data['gps'] = (lat/1e7, lon/1e7)
-                        except:
-                            pass
-            except Exception as e:
-                print(f"ELRS error: {str(e)}")
-                elrs = None
-        sleep(0.1)
+        for device_id in device_manager.devices:
+            device_manager.update_signal(device_id, (time.time() % 30) + 70)
+        time.sleep(2)
 
 if __name__ == "__main__":
-    # Start telemetry thread
-    telemetry_thread = threading.Thread(target=handle_telemetry, daemon=True)
-    telemetry_thread.start()
+    # Start background threads
+    threading.Thread(target=telemetry_thread, daemon=True).start()
+    threading.Thread(target=simulate_devices, daemon=True).start()
     
-    # Start Taranis handler thread
-    taranis_thread = threading.Thread(target=handle_taranis, daemon=True)
-    taranis_thread.start()
-    
-    # Scan network devices on startup
-    scan_network_devices()
-    
-    # Start Flask
-    app.run(host='0.0.0.0', port=5000, threaded=True)
+    # Start Flask-SocketIO
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
